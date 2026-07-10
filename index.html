@@ -151,7 +151,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
   signOut, onAuthStateChanged, deleteUser, reauthenticateWithCredential,
-  EmailAuthProvider
+  EmailAuthProvider, sendPasswordResetEmail, updateEmail
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc, deleteField,
@@ -197,12 +197,14 @@ const INVITE_CODE = "Brno27slatina";
 const state = {
   view: 'loading',            // 'loading' | 'login' | 'register' | 'dashboard'
   authError: '', authLoading: false, authNotice: '',
-  currentUser: null,          // {uid, username, registeredAt, goal}
+  currentUser: null,          // {uid, username, registeredAt, goal, authEmail}
   stepsMap: {}, dateInput: todayStr(), message: '',
   leaderboard: [], lbLoading: false, saving: false,
   weeklyTop5: [], monthlyGoalTop5: [], monthlyHistory: [],
   editingGoal: false, goalInput: '', goalError: '',
   deletingAccount: false, deleteError: '', deleteBusy: false,
+  showForgotPassword: false, forgotNotice: '', forgotError: '', forgotBusy: false,
+  editingEmail: false, emailInput: '', emailError: '', emailBusy: false,
 };
 
 function todayStr(){
@@ -213,6 +215,15 @@ function fmt(n){ return Number(n||0).toLocaleString('cs-CZ'); }
 function toEmail(username){ return username.toLowerCase()+EMAIL_DOMAIN; }
 function escapeHtml(s){ const d=document.createElement('div'); d.textContent=String(s); return d.innerHTML; }
 function daysBetween(a,b){ return Math.floor((b.getTime()-a.getTime())/86400000); }
+function isValidEmail(s){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s); }
+
+async function resolveLoginEmail(username){
+  try{
+    const snap = await getDoc(doc(db,'emailLookup', username.toLowerCase()));
+    if (snap.exists() && snap.data().email) return snap.data().email;
+  }catch(e){ /* fall through to legacy scheme */ }
+  return toEmail(username);
+}
 
 function isoWeekRange(d){
   const day = (d.getDay()+6)%7; // Monday = 0
@@ -368,6 +379,10 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if false;
     }
+    match /emailLookup/{username} {
+      allow read: if true;
+      allow write: if request.auth != null && request.resource.data.uid == request.auth.uid;
+    }
     match /users/{uid} {
       allow read: if request.auth != null;
       allow create: if request.auth != null && request.auth.uid == uid
@@ -385,7 +400,24 @@ service cloud.firestore {
   `;
 }
 
+function forgotPasswordTemplate(){
+  return `
+    <div class="auth-card">
+      <h1>Obnovení hesla</h1>
+      <div class="sub">Zadejte své uživatelské jméno. Pokud má účet uložený e-mail, pošleme na něj odkaz pro nastavení nového hesla.</div>
+      ${state.forgotNotice ? `<div class="success-box">${escapeHtml(state.forgotNotice)}</div>` : ''}
+      ${state.forgotError ? `<div class="error-box">${escapeHtml(state.forgotError)}</div>` : ''}
+      <form data-form="forgot">
+        <div class="field"><label>Uživatelské jméno</label><input name="username" autocomplete="username"/></div>
+        <button class="btn-primary" type="submit" ${state.forgotBusy?'disabled':''}>${state.forgotBusy?'Odesílám…':'Odeslat odkaz'}</button>
+      </form>
+      <div class="switch-line"><a data-action="close-forgot">Zpět na přihlášení</a></div>
+    </div>
+  `;
+}
+
 function authTemplate(){
+  if (state.showForgotPassword) return forgotPasswordTemplate();
   const isLogin = state.view==='login';
   return `
     <div class="auth-card">
@@ -398,10 +430,12 @@ function authTemplate(){
         <div class="field"><label>Heslo</label><input name="password" type="password" autocomplete="${isLogin?'current-password':'new-password'}"/></div>
         ${!isLogin ? `
         <div class="field"><label>Heslo znovu</label><input name="confirm" type="password" autocomplete="new-password"/></div>
+        <div class="field"><label>E-mail (jen pro obnovu zapomenutého hesla)</label><input name="email" type="email" autocomplete="email"/></div>
         <div class="field"><label>Přístupový kód</label><input name="invite" type="text" autocomplete="off"/></div>
         <div class="field"><label>Cíl v krocích (za ${GOAL_DAYS} dní)</label><input name="goal" type="number" min="1" step="1" placeholder="${fmt(DEFAULT_GOAL)}"/></div>` : ''}
         <button class="btn-primary" type="submit" ${state.authLoading?'disabled':''}>${state.authLoading?'Chvilku…':(isLogin?'Přihlásit se':'Zaregistrovat se')}</button>
       </form>
+      ${isLogin ? `<div class="switch-line"><a data-action="open-forgot">Zapomněli jste heslo?</a></div>` : ''}
       <div class="switch-line">
         ${isLogin ? `Nemáte účet? <a data-action="switch-register">Vytvořit nový</a>` : `Už máte účet? <a data-action="switch-login">Přihlásit se</a>`}
       </div>
@@ -427,6 +461,20 @@ function dashboardTemplate(){
   ` : `
     <div class="goal-line">Váš cíl: <b>${fmt(goal)}</b> kroků za ${GOAL_DAYS} dní od registrace
       <a class="edit-link" data-action="edit-goal">Změnit</a>
+    </div>
+  `;
+
+  const hasRealEmail = u.authEmail && !u.authEmail.endsWith(EMAIL_DOMAIN);
+  const emailLine = state.editingEmail ? `
+    <form class="goal-edit-form" data-form="email">
+      <input name="email" type="email" value="${escapeHtml(state.emailInput)}" placeholder="vas@email.cz" autofocus/>
+      <button class="goal-save" type="submit" ${state.emailBusy?'disabled':''}>${state.emailBusy?'Ukládám…':'Uložit'}</button>
+      <button class="goal-cancel" type="button" data-action="cancel-email">Zrušit</button>
+    </form>
+    ${state.emailError ? `<div class="error-box" style="margin-top:8px;">${escapeHtml(state.emailError)}</div>` : ''}
+  ` : `
+    <div class="goal-line">${hasRealEmail ? `E-mail pro obnovu hesla: <b>${escapeHtml(u.authEmail)}</b>` : `E-mail pro obnovu hesla není nastavený — bez něj si nepůjde obnovit zapomenuté heslo.`}
+      <a class="edit-link" data-action="edit-email">${hasRealEmail?'Změnit':'Nastavit'}</a>
     </div>
   `;
 
@@ -487,6 +535,7 @@ function dashboardTemplate(){
         ${trailSvg(total, goal)}
         <div class="trail-meta"><div><span class="status-pill ${statusClass}">${statusLabel}</span></div><div>Zbývá <b>${p.daysLeft}</b> dní · potřeba <b>${p.perDayNeeded===Infinity?'—':fmt(p.perDayNeeded)}</b> kr./den</div></div>
         ${goalLine}
+        ${emailLine}
       </div>
     </div>
     <div class="grid">
@@ -562,11 +611,12 @@ async function handleAuthSubmit(form){
   if (password.length < 6){
     state.authError = 'Heslo musí mít alespoň 6 znaků.'; render(); return;
   }
-  const email = toEmail(username);
 
   if (state.view==='register'){
     const confirm = form.confirm ? form.confirm.value : '';
     if (password !== confirm){ state.authError = 'Hesla se neshodují.'; render(); return; }
+    const realEmail = (form.email ? form.email.value : '').trim();
+    if (!isValidEmail(realEmail)){ state.authError = 'Zadejte platnou e-mailovou adresu (potřebujeme ji jen pro obnovu hesla).'; render(); return; }
     const inviteRaw = form.invite ? form.invite.value : '';
     if (inviteRaw !== INVITE_CODE){ state.authError = 'Nesprávný přístupový kód.'; render(); return; }
     let goal = DEFAULT_GOAL;
@@ -579,7 +629,7 @@ async function handleAuthSubmit(form){
     state.authLoading = true; render();
     let cred;
     try{
-      cred = await createUserWithEmailAndPassword(auth, email, password);
+      cred = await createUserWithEmailAndPassword(auth, realEmail, password);
     }catch(err){
       state.authLoading = false;
       state.authError = firebaseErrorMessage(err);
@@ -590,6 +640,7 @@ async function handleAuthSubmit(form){
       const registeredAt = new Date().toISOString();
       await setDoc(doc(db,'users',uid), {username: username.toLowerCase(), goal, registeredAt});
       await setDoc(doc(db,'steps',uid), {});
+      await setDoc(doc(db,'emailLookup',username.toLowerCase()), {email: realEmail, uid});
       state.authLoading = false;
       // onAuthStateChanged will pick this up and enter the dashboard
     }catch(writeErr){
@@ -604,6 +655,7 @@ async function handleAuthSubmit(form){
   } else {
     state.authLoading = true; render();
     try{
+      const email = await resolveLoginEmail(username);
       await signInWithEmailAndPassword(auth, email, password);
       state.authLoading = false;
       // onAuthStateChanged will pick this up and enter the dashboard
@@ -613,6 +665,25 @@ async function handleAuthSubmit(form){
       render();
     }
   }
+}
+
+async function handleForgotPassword(form){
+  const username = (form.username.value||'').trim();
+  state.forgotError=''; state.forgotNotice='';
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)){
+    state.forgotError = 'Zadejte platné uživatelské jméno.'; render(); return;
+  }
+  state.forgotBusy = true; render();
+  try{
+    const email = await resolveLoginEmail(username);
+    await sendPasswordResetEmail(auth, email);
+  }catch(err){
+    // swallow errors here on purpose — we don't want to reveal whether a
+    // username exists to whoever is using this form
+  }
+  state.forgotBusy = false;
+  state.forgotNotice = 'Pokud má toto jméno u účtu uložený e-mail, poslali jsme na něj odkaz pro nastavení nového hesla. Zkontrolujte i složku Spam.';
+  render();
 }
 
 async function loadUserAndEnter(fbUser){
@@ -625,7 +696,7 @@ async function loadUserAndEnter(fbUser){
     const data = snap.data();
     const stepsSnap = await getDoc(doc(db,'steps',fbUser.uid));
     const stepsMap = stepsSnap.exists() ? stepsSnap.data() : {};
-    state.currentUser = {uid: fbUser.uid, username: data.username, registeredAt: data.registeredAt, goal: data.goal || DEFAULT_GOAL};
+    state.currentUser = {uid: fbUser.uid, username: data.username, registeredAt: data.registeredAt, goal: data.goal || DEFAULT_GOAL, authEmail: fbUser.email || ''};
     state.stepsMap = stepsMap;
     state.dateInput = todayStr();
     state.message = ''; state.editingGoal = false; state.goalError = '';
@@ -713,6 +784,29 @@ async function handleGoalSubmit(form){
   }
 }
 
+async function handleEmailSubmit(form){
+  const newEmail = (form.email.value||'').trim();
+  if (!isValidEmail(newEmail)){ state.emailError = 'Zadejte platnou e-mailovou adresu.'; render(); return; }
+  state.emailError = ''; state.emailBusy = true; render();
+  try{
+    await updateEmail(auth.currentUser, newEmail);
+    await setDoc(doc(db,'emailLookup', state.currentUser.username), {email: newEmail, uid: state.currentUser.uid});
+    state.currentUser.authEmail = newEmail;
+    state.editingEmail = false;
+    state.emailBusy = false;
+    state.message = 'E-mail pro obnovu hesla byl uložen.';
+    render();
+  }catch(err){
+    state.emailBusy = false;
+    if (err && err.code === 'auth/requires-recent-login'){
+      state.emailError = 'Z bezpečnostních důvodů se prosím odhlaste, znovu přihlaste a zkuste to hned poté.';
+    } else {
+      state.emailError = firebaseErrorMessage(err);
+    }
+    render();
+  }
+}
+
 async function handleDeleteAccountSubmit(form){
   const password = form.password.value||'';
   state.deleteError = '';
@@ -753,6 +847,7 @@ if (NEEDS_SETUP){
       state.currentUser = null; state.stepsMap = {}; state.leaderboard = [];
       state.weeklyTop5 = []; state.monthlyGoalTop5 = []; state.monthlyHistory = [];
       state.deletingAccount = false; state.deleteError = ''; state.deleteBusy = false;
+      state.editingEmail = false; state.emailError = ''; state.showForgotPassword = false;
       state.view = state.view==='register' ? 'register' : 'login';
       render();
     }
@@ -766,7 +861,9 @@ if (NEEDS_SETUP){
     if (formName==='auth') handleAuthSubmit(e.target);
     if (formName==='entry') handleEntrySubmit(e.target);
     if (formName==='goal') handleGoalSubmit(e.target);
+    if (formName==='email') handleEmailSubmit(e.target);
     if (formName==='delete-account') handleDeleteAccountSubmit(e.target);
+    if (formName==='forgot') handleForgotPassword(e.target);
   });
 
   appEl.addEventListener('click', function(e){
@@ -779,8 +876,12 @@ if (NEEDS_SETUP){
     if (action==='delete-entry'){ deleteEntry(el.getAttribute('data-date')); }
     if (action==='edit-goal'){ state.editingGoal=true; state.goalInput=String(state.currentUser.goal||DEFAULT_GOAL); state.goalError=''; render(); }
     if (action==='cancel-goal'){ state.editingGoal=false; state.goalError=''; render(); }
+    if (action==='edit-email'){ state.editingEmail=true; state.emailInput=(state.currentUser.authEmail&&!state.currentUser.authEmail.endsWith(EMAIL_DOMAIN))?state.currentUser.authEmail:''; state.emailError=''; render(); }
+    if (action==='cancel-email'){ state.editingEmail=false; state.emailError=''; render(); }
     if (action==='open-delete-account'){ state.deletingAccount=true; state.deleteError=''; render(); }
     if (action==='cancel-delete-account'){ state.deletingAccount=false; state.deleteError=''; render(); }
+    if (action==='open-forgot'){ state.showForgotPassword=true; state.forgotNotice=''; state.forgotError=''; render(); }
+    if (action==='close-forgot'){ state.showForgotPassword=false; render(); }
   });
 
   appEl.addEventListener('change', function(e){
