@@ -138,6 +138,24 @@ input[type="date"], input[type="number"], input[type="text"], input[type="passwo
 .delete-form .field{max-width:280px;}
 .delete-actions{display:flex; gap:10px; align-items:center;}
 
+.reward-form-row{display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;}
+.reward-form-row .field{margin-bottom:0;}
+.reward-form-row select{padding:9px 8px; border:1px solid var(--line); border-radius:6px; font-size:14px; font-family:'IBM Plex Sans', sans-serif; background:#fff; color:var(--ink);}
+.reward-form-row input[type="text"]{min-width:180px;}
+.reward-form-row button{white-space:nowrap;}
+.reward-cat{margin-top:16px;}
+.reward-cat:first-of-type{margin-top:18px;}
+.reward-cat h3{font-size:13px; margin:0 0 4px; color:var(--forest-deep); font-family:'Fraunces', serif;}
+.reward-row{display:flex; align-items:center; gap:8px; padding:7px 2px; border-bottom:1px solid var(--line); font-size:13px; cursor:pointer;}
+.reward-row:hover{background:#F2ECD9;}
+.reward-row.mine{background:#EFE7CE; border-radius:6px; padding:7px 8px; margin:0 -6px;}
+.reward-radio{width:14px; text-align:center; color:var(--moss); font-size:13px; flex-shrink:0;}
+.reward-text{flex:1;}
+.reward-by{color:var(--ink-soft); font-size:11.5px;}
+.reward-votes{font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--ink-soft); min-width:20px; text-align:right; flex-shrink:0;}
+.reward-row.top .reward-votes{color:var(--amber-deep); font-weight:700;}
+.reward-empty{font-size:12.5px; color:var(--ink-soft); font-style:italic; padding:4px 0 8px;}
+
 .setup-card{max-width:640px; margin:50px auto; background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:30px 34px;}
 .setup-card h1{font-size:22px; margin-bottom:14px;}
 .setup-card ol{padding-left:20px; font-size:14px; line-height:1.8;}
@@ -158,7 +176,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, setDoc, getDoc, updateDoc, deleteDoc, deleteField,
-  collection, getDocs
+  collection, getDocs, addDoc
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* =====================================================================
@@ -197,6 +215,8 @@ const EMAIL_DOMAIN = '@stezka-app.invalid';
    (viz Firestore pravidla níže). */
 const INVITE_CODE = "Brno27slatina";
 
+const REWARD_CATEGORIES = ['25','50','75','100'];
+
 const state = {
   view: 'loading',            // 'loading' | 'login' | 'register' | 'dashboard'
   authError: '', authLoading: false, authNotice: '',
@@ -208,6 +228,8 @@ const state = {
   deletingAccount: false, deleteError: '', deleteBusy: false,
   showForgotPassword: false, forgotNotice: '', forgotError: '', forgotBusy: false,
   editingEmail: false, emailInput: '', emailError: '', emailBusy: false,
+  rewardProposals: [], rewardVotes: [], rewardLoading: false,
+  rewardCategoryInput: '25', rewardTextInput: '', rewardError: '',
 };
 
 function todayStr(){
@@ -411,6 +433,16 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == uid;
     }
+    match /rewardProposals/{proposalId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+    match /rewardVotes/{voteId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.resource.data.uid == request.auth.uid
+                   && voteId == request.auth.uid + '_' + request.resource.data.category;
+    }
   }
 }</pre>
       <div class="danger-desc">Soubor pak uložte a znovu otevřete v prohlížeči.</div>
@@ -546,6 +578,41 @@ function dashboardTemplate(){
     </div>
   `).join('') : `<div class="empty-hint">Zatím nejsou žádná data k vyhodnocení.</div>`;
 
+  const rewardProposalsHtml = REWARD_CATEGORIES.map(cat=>{
+    const items = state.rewardProposals.filter(p=>p.category===cat).sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
+    const rows = items.length ? items.map(p=>`
+      <div class="reward-row" style="cursor:default;">
+        <span class="reward-text">${escapeHtml(p.text)} <span class="reward-by">(${escapeHtml(p.proposedBy)})</span></span>
+      </div>
+    `).join('') : `<div class="reward-empty">Zatím žádné návrhy.</div>`;
+    return `<div class="reward-cat"><h3>${cat} %</h3>${rows}</div>`;
+  }).join('');
+
+  const rewardVotingHtml = REWARD_CATEGORIES.map(cat=>{
+    const items = state.rewardProposals.filter(p=>p.category===cat).map(p=>({
+      ...p, votes: state.rewardVotes.filter(v=>v.proposalId===p.id).length
+    }));
+    if (!items.length){
+      return `<div class="reward-cat"><h3>${cat} %</h3><div class="reward-empty">Zatím žádné návrhy k hlasování.</div></div>`;
+    }
+    items.sort((a,b)=>b.votes-a.votes);
+    const maxVotes = items[0].votes;
+    const myVote = state.rewardVotes.find(v=>v.uid===u.uid && v.category===cat);
+    const myVoteId = myVote ? myVote.proposalId : null;
+    const rows = items.map(p=>{
+      const isTop = maxVotes>0 && p.votes===maxVotes;
+      const isMine = p.id===myVoteId;
+      return `
+        <div class="reward-row ${isTop?'top':''} ${isMine?'mine':''}" data-action="vote" data-category="${cat}" data-proposal="${p.id}">
+          <span class="reward-radio">${isMine?'●':'○'}</span>
+          <span class="reward-text">${escapeHtml(p.text)} <span class="reward-by">(${escapeHtml(p.proposedBy)})</span></span>
+          <span class="reward-votes">${p.votes}${isTop&&maxVotes>0?' 🏆':''}</span>
+        </div>
+      `;
+    }).join('');
+    return `<div class="reward-cat"><h3>${cat} %</h3>${rows}</div>`;
+  }).join('');
+
   return `
     <div class="topbar">
       <div><h1>Stezka</h1><div class="tag">${fmt(goal)} kroků za ${GOAL_DAYS} dní</div></div>
@@ -602,6 +669,31 @@ function dashboardTemplate(){
         <div>Měsíc</div><div>Nejlepší</div><div style="text-align:right;">Plnění</div>
       </div>
       ${monthHistoryRows}
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h2><span class="eyebrow">Návrhy</span>Holky, čím se odměníme?</h2>
+        <form class="reward-form-row" data-form="reward-proposal">
+          <div class="field">
+            <label>Kategorie</label>
+            <select name="category">
+              ${REWARD_CATEGORIES.map(c=>`<option value="${c}" ${c===state.rewardCategoryInput?'selected':''}>${c} %</option>`).join('')}
+            </select>
+          </div>
+          <div class="field" style="flex:1;">
+            <label>Návrh odměny</label>
+            <input name="text" type="text" placeholder="např. Trekové ponožky s logem"/>
+          </div>
+          <button class="btn-primary" type="submit" style="width:auto;">Přidat návrh</button>
+        </form>
+        ${state.rewardError ? `<div class="error-box" style="margin-top:10px;">${escapeHtml(state.rewardError)}</div>` : ''}
+        ${rewardProposalsHtml}
+      </div>
+      <div class="card">
+        <h2><span class="eyebrow">Hlasování</span>Vyberte odměnu</h2>
+        ${rewardVotingHtml}
+        <div class="footnote">V každé kategorii můžete hlasovat jen pro jeden návrh. Kliknutím na jinou možnost svůj hlas kdykoliv změníte.</div>
+      </div>
     </div>
     <div class="card danger-card">
       <h2><span class="eyebrow">Nebezpečná zóna</span>Zrušit účet</h2>
@@ -727,6 +819,7 @@ async function loadUserAndEnter(fbUser){
     state.view = 'dashboard';
     render();
     loadLeaderboard();
+    loadRewards();
   }catch(err){
     state.authError = firebaseErrorMessage(err);
     state.view = 'login'; render();
@@ -758,7 +851,56 @@ async function loadLeaderboard(){
   if (state.view==='dashboard') render();
 }
 
-async function handleEntrySubmit(form){
+async function loadRewards(){
+  state.rewardLoading = true;
+  try{
+    const [proposalsSnap, votesSnap] = await Promise.all([
+      getDocs(collection(db,'rewardProposals')),
+      getDocs(collection(db,'rewardVotes')),
+    ]);
+    state.rewardProposals = proposalsSnap.docs.map(d=>({id: d.id, ...d.data()}));
+    state.rewardVotes = votesSnap.docs.map(d=>({id: d.id, ...d.data()}));
+  }catch(err){
+    // non-fatal — leave whatever we already had
+  }
+  state.rewardLoading = false;
+  if (state.view==='dashboard') render();
+}
+
+async function handleRewardProposalSubmit(form){
+  const category = form.category.value;
+  const text = (form.text.value||'').trim();
+  state.rewardError = '';
+  if (!REWARD_CATEGORIES.includes(category)){ state.rewardError = 'Vyberte prosím kategorii.'; render(); return; }
+  if (!text){ state.rewardError = 'Napište návrh odměny.'; render(); return; }
+  state.rewardCategoryInput = category;
+  try{
+    await addDoc(collection(db,'rewardProposals'), {
+      category, text, proposedBy: state.currentUser.username, uid: state.currentUser.uid,
+      createdAt: new Date().toISOString(),
+    });
+    state.rewardTextInput = '';
+    loadRewards();
+  }catch(err){
+    state.rewardError = firebaseErrorMessage(err);
+    render();
+  }
+}
+
+async function handleVote(category, proposalId){
+  const voteId = state.currentUser.uid + '_' + category;
+  try{
+    await setDoc(doc(db,'rewardVotes', voteId), {
+      category, proposalId, uid: state.currentUser.uid, username: state.currentUser.username,
+      updatedAt: new Date().toISOString(),
+    });
+    loadRewards();
+  }catch(err){
+    // non-fatal, just leave the previous vote state visible
+  }
+}
+
+
   const date = form.date.value;
   const stepsVal = form.steps.value;
   if (!date || date > todayStr()) return;
@@ -872,6 +1014,7 @@ if (NEEDS_SETUP){
       state.weeklyTop5 = []; state.monthlyGoalTop5 = []; state.monthlyHistory = [];
       state.deletingAccount = false; state.deleteError = ''; state.deleteBusy = false;
       state.editingEmail = false; state.emailError = ''; state.showForgotPassword = false;
+      state.rewardProposals = []; state.rewardVotes = []; state.rewardError = '';
       state.view = state.view==='register' ? 'register' : 'login';
       render();
     }
@@ -888,6 +1031,7 @@ if (NEEDS_SETUP){
     if (formName==='email') handleEmailSubmit(e.target);
     if (formName==='delete-account') handleDeleteAccountSubmit(e.target);
     if (formName==='forgot') handleForgotPassword(e.target);
+    if (formName==='reward-proposal') handleRewardProposalSubmit(e.target);
   });
 
   appEl.addEventListener('click', function(e){
@@ -906,6 +1050,7 @@ if (NEEDS_SETUP){
     if (action==='cancel-delete-account'){ state.deletingAccount=false; state.deleteError=''; render(); }
     if (action==='open-forgot'){ state.showForgotPassword=true; state.forgotNotice=''; state.forgotError=''; render(); }
     if (action==='close-forgot'){ state.showForgotPassword=false; render(); }
+    if (action==='vote'){ handleVote(el.getAttribute('data-category'), el.getAttribute('data-proposal')); }
   });
 
   appEl.addEventListener('change', function(e){
