@@ -283,6 +283,15 @@ function lastEntryDate(stepsMap){
   if (!keys.length) return null;
   return keys.sort().slice(-1)[0];
 }
+function computeSuggestedDate(stepsMap){
+  const today = todayStr();
+  const last = lastEntryDate(stepsMap);
+  if (!last) return today;
+  const d = new Date(last+'T00:00:00');
+  d.setDate(d.getDate()+1);
+  const nextStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  return nextStr > today ? today : nextStr;
+}
 function formatRelativeDateCz(dateStr){
   if (!dateStr) return '';
   if (dateStr === todayStr()) return 'dnes';
@@ -814,7 +823,7 @@ async function loadUserAndEnter(fbUser){
     const stepsMap = stepsSnap.exists() ? stepsSnap.data() : {};
     state.currentUser = {uid: fbUser.uid, username: data.username, registeredAt: data.registeredAt, goal: data.goal || DEFAULT_GOAL, authEmail: fbUser.email || ''};
     state.stepsMap = stepsMap;
-    state.dateInput = todayStr();
+    state.dateInput = computeSuggestedDate(stepsMap);
     state.message = ''; state.editingGoal = false; state.goalError = '';
     state.view = 'dashboard';
     render();
@@ -912,6 +921,7 @@ async function handleEntrySubmit(form){
   try{
     await setDoc(doc(db,'steps',state.currentUser.uid), {[date]: steps}, {merge:true});
     state.stepsMap = {...state.stepsMap, [date]: steps};
+    state.dateInput = computeSuggestedDate(state.stepsMap);
     state.message = `Uloženo: ${date} — ${fmt(steps)} kroků.`;
   }catch(err){
     state.message = '';
