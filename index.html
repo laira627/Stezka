@@ -60,6 +60,7 @@ h1,h2,h3{font-family:'Fraunces', serif; margin:0; color:var(--forest-deep);}
   .lb-row{grid-template-columns:20px 1fr 66px 58px; font-size:12.5px; gap:6px; padding:8px 2px;}
   .lb-row.cols3{grid-template-columns:20px 1fr 66px;}
   .month-history-row{grid-template-columns:1.1fr 1fr 50px; font-size:12px; gap:6px;}
+  .weeks-wrap{grid-template-columns:1fr; gap:22px;}
   .goal-edit-form{flex-wrap:wrap;}
   .goal-edit-form input{width:120px;}
   .delete-actions{flex-direction:column; align-items:stretch;}
@@ -118,6 +119,24 @@ input[type="date"], input[type="number"], input[type="text"], input[type="passwo
 .lb-pct-main{font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--amber-deep); font-weight:600;}
 .lb-pct-sub{font-size:9.5px; color:var(--ink-soft); white-space:nowrap;}
 
+.weeks-wrap{display:grid; grid-template-columns:1fr 1fr; gap:28px;}
+.week-sub{font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--moss); margin-bottom:4px;}
+.podium{display:flex; align-items:flex-end; justify-content:center; gap:8px; margin:14px 0 4px;}
+.podium-col{flex:1; max-width:150px; min-width:0; text-align:center;}
+.podium-name{font-weight:600; font-size:13px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.podium-steps{font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--forest-deep); margin-bottom:5px; min-height:15px;}
+.podium-block{border-radius:6px 6px 0 0; display:flex; align-items:flex-start; justify-content:center; padding-top:6px; font-size:20px;}
+.podium-col.p1 .podium-block{height:78px; background:linear-gradient(#E6BC57,#C99A2E);}
+.podium-col.p2 .podium-block{height:56px; background:linear-gradient(#CBCBC2,#A6A69D);}
+.podium-col.p3 .podium-block{height:42px; background:linear-gradient(#D2955F,#B0723F);}
+.podium-col.me .podium-name{color:var(--amber-deep); text-decoration:underline; text-underline-offset:3px;}
+.tally-row{display:grid; grid-template-columns:1fr 38px 38px 38px; gap:6px; align-items:center; padding:8px 4px; border-bottom:1px solid var(--line); font-size:13.5px;}
+.tally-row.head{border-bottom:2px solid var(--forest); font-size:15px; padding-top:2px;}
+.tally-row.me{background:#EFE7CE; border-radius:6px; margin:0 -6px; padding:8px 10px;}
+.tally-row .nm{font-weight:600; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.tally-row .n{font-family:'IBM Plex Mono', monospace; text-align:center; color:var(--forest-deep); font-weight:600;}
+.tally-row .n.zero{color:#C9BC9C; font-weight:400;}
+.tally-row.head > div{text-align:center;}
 .month-history-row{display:grid; grid-template-columns:1fr 1fr 70px; align-items:center; gap:10px; padding:8px 4px; border-bottom:1px solid var(--line); font-size:13.5px;}
 .month-history-row .m{font-family:'IBM Plex Mono', monospace; color:var(--ink-soft); font-size:12px; text-transform:capitalize;}
 .month-history-row .w{font-weight:600; color:var(--forest-deep);}
@@ -224,6 +243,7 @@ const state = {
   stepsMap: {}, dateInput: todayStr(), message: '',
   leaderboard: [], lbLoading: false, saving: false,
   weeklyTop5: [], monthlyGoalTop5: [], monthlyHistory: [],
+  weeklyAwards: {lastWeekLabel:'', podium:[], tally:[]},
   editingGoal: false, goalInput: '', goalError: '',
   deletingAccount: false, deleteError: '', deleteBusy: false,
   showForgotPassword: false, forgotNotice: '', forgotError: '', forgotBusy: false,
@@ -291,6 +311,51 @@ function computeSuggestedDate(stepsMap){
   d.setDate(d.getDate()+1);
   const nextStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   return nextStr > today ? today : nextStr;
+}
+
+function dateKey(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function shortDate(d){ return d.getDate()+'. '+(d.getMonth()+1)+'.'; }
+function weekKeyOf(dateStr){
+  const d = new Date(dateStr+'T12:00:00');
+  d.setDate(d.getDate() - ((d.getDay()+6)%7)); // Monday of that week
+  return dateKey(d);
+}
+function computeWeeklyAwards(rows){
+  const curKey = weekKeyOf(todayStr());
+  const prev = new Date(curKey+'T12:00:00'); prev.setDate(prev.getDate()-7);
+  const lastKey = dateKey(prev);
+
+  // total steps per user per completed week (only users with steps > 0)
+  const weeks = {};
+  rows.forEach(r=>{
+    Object.entries(r.stepsMap||{}).forEach(([ds, steps])=>{
+      const k = weekKeyOf(ds);
+      if (k >= curKey) return;
+      const n = Number(steps||0);
+      if (!(n>0)) return;
+      weeks[k] = weeks[k] || {};
+      if (!weeks[k][r.uid]) weeks[k][r.uid] = {uid:r.uid, username:r.username, total:0};
+      weeks[k][r.uid].total += n;
+    });
+  });
+  const rankWeek = k => Object.values(weeks[k]||{})
+    .sort((a,b)=>b.total-a.total || a.username.localeCompare(b.username)).slice(0,3);
+
+  // medal tally for all completed weeks BEFORE last week
+  const tallyMap = {};
+  Object.keys(weeks).filter(k=>k<lastKey).forEach(k=>{
+    rankWeek(k).forEach((e,i)=>{
+      const t = tallyMap[e.uid] = tallyMap[e.uid] || {uid:e.uid, username:e.username, gold:0, silver:0, bronze:0};
+      if (i===0) t.gold++; else if (i===1) t.silver++; else t.bronze++;
+    });
+  });
+  const tally = Object.values(tallyMap).sort((a,b)=>
+    b.gold-a.gold || b.silver-a.silver || b.bronze-a.bronze || a.username.localeCompare(b.username));
+
+  const sun = new Date(prev); sun.setDate(sun.getDate()+6);
+  return {lastWeekLabel: shortDate(prev)+' – '+shortDate(sun), podium: rankWeek(lastKey), tally};
 }
 function formatRelativeDateCz(dateStr){
   if (!dateStr) return '';
@@ -587,6 +652,30 @@ function dashboardTemplate(){
     </div>
   `).join('') : `<div class="empty-hint">Zatím nejsou žádná data k vyhodnocení.</div>`;
 
+  const aw = state.weeklyAwards;
+  const medals = ['🥇','🥈','🥉'];
+  const podiumHtml = aw.podium.length ? `
+    <div class="podium">
+      ${[2,1,3].map(place=>{
+        const e = aw.podium[place-1];
+        return `<div class="podium-col p${place} ${e&&e.uid===u.uid?'me':''}">
+          <div class="podium-name">${e?escapeHtml(e.username):'—'}</div>
+          <div class="podium-steps">${e?fmt(e.total):''}</div>
+          <div class="podium-block">${medals[place-1]}</div>
+        </div>`;
+      }).join('')}
+    </div>` : `<div class="empty-hint">${state.lbLoading?'Načítám…':'Minulý týden nikdo nezadal žádné kroky.'}</div>`;
+  const tallyHtml = aw.tally.length ? `
+    <div class="tally-row head"><div></div><div>🥇</div><div>🥈</div><div>🥉</div></div>
+    ${aw.tally.map(t=>`
+      <div class="tally-row ${t.uid===u.uid?'me':''}">
+        <div class="nm">${escapeHtml(t.username)}</div>
+        <div class="n ${t.gold?'':'zero'}">${t.gold||'–'}</div>
+        <div class="n ${t.silver?'':'zero'}">${t.silver||'–'}</div>
+        <div class="n ${t.bronze?'':'zero'}">${t.bronze||'–'}</div>
+      </div>`).join('')}
+  ` : `<div class="empty-hint">${state.lbLoading?'Načítám…':'Zatím žádné dřívější týdny k vyhodnocení.'}</div>`;
+
   const rewardProposalsHtml = REWARD_CATEGORIES.map(cat=>{
     const items = state.rewardProposals.filter(p=>p.category===cat).sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
     const rows = items.length ? items.map(p=>`
@@ -678,6 +767,20 @@ function dashboardTemplate(){
         <div>Měsíc</div><div>Nejlepší</div><div style="text-align:right;">Plnění</div>
       </div>
       ${monthHistoryRows}
+    </div>
+    <div class="card">
+      <h2><span class="eyebrow">Týdny</span>Týdenní vyhodnocení</h2>
+      <div class="weeks-wrap">
+        <div>
+          <div class="week-sub">Minulý týden · ${escapeHtml(aw.lastWeekLabel)}</div>
+          ${podiumHtml}
+        </div>
+        <div>
+          <div class="week-sub">Dřívější týdny · počet umístění</div>
+          ${tallyHtml}
+        </div>
+      </div>
+      <div class="footnote">Týden = pondělí až neděle, pořadí podle celkového počtu nachozených kroků (bez ohledu na cíl). Uzavřený týden se přepočítá, pokud někdo doplní kroky zpětně.</div>
     </div>
     <div class="grid">
       <div class="card">
@@ -853,6 +956,7 @@ async function loadLeaderboard(){
     state.weeklyTop5 = computeWeeklyTop5(rows);
     state.monthlyGoalTop5 = computeMonthlyGoalTop5(rows);
     state.monthlyHistory = computeMonthlyHistory(rows);
+    state.weeklyAwards = computeWeeklyAwards(rows);
   }catch(err){
     // leaderboard failures are non-fatal, just leave the lists empty
   }
@@ -1023,6 +1127,7 @@ if (NEEDS_SETUP){
     } else {
       state.currentUser = null; state.stepsMap = {}; state.leaderboard = [];
       state.weeklyTop5 = []; state.monthlyGoalTop5 = []; state.monthlyHistory = [];
+      state.weeklyAwards = {lastWeekLabel:'', podium:[], tally:[]};
       state.deletingAccount = false; state.deleteError = ''; state.deleteBusy = false;
       state.editingEmail = false; state.emailError = ''; state.showForgotPassword = false;
       state.rewardProposals = []; state.rewardVotes = []; state.rewardError = '';
