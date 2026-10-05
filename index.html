@@ -44,36 +44,6 @@ h1,h2,h3{font-family:'Fraunces', serif; margin:0; color:var(--forest-deep);}
 .success-box{background:#E6EDE3; border:1px solid var(--moss); color:var(--forest-deep); border-radius:6px; padding:9px 12px; font-size:13px; margin-bottom:14px;}
 
 .grid{display:grid; grid-template-columns:1.1fr 1fr; gap:20px;}
-@media (max-width:720px){
-  .wrap{padding:16px 12px 40px;}
-  .grid{grid-template-columns:1fr; gap:14px;}
-  .topbar{flex-wrap:wrap; gap:8px 14px; margin-bottom:16px;}
-  .topbar h1{font-size:23px;}
-  .user-chip{font-size:12.5px; flex-wrap:wrap;}
-  .card{padding:16px 15px; margin-bottom:14px;}
-  .auth-card{margin:24px auto; padding:24px 18px; max-width:none;}
-  .entry-row{flex-direction:column; gap:0;}
-  .entry-row .field{margin-bottom:14px;}
-  .trail-total{font-size:23px;}
-  .trail-stats{flex-wrap:wrap; gap:6px;}
-  .trail-meta{flex-direction:column; align-items:flex-start; gap:6px;}
-  .lb-row{grid-template-columns:20px 1fr 66px 58px; font-size:12.5px; gap:6px; padding:8px 2px;}
-  .lb-row.cols3{grid-template-columns:20px 1fr 66px;}
-  .month-history-row{grid-template-columns:1.1fr 1fr 50px; font-size:12px; gap:6px;}
-  .weeks-wrap{grid-template-columns:1fr; gap:22px;}
-  .goal-edit-form{flex-wrap:wrap;}
-  .goal-edit-form input{width:120px;}
-  .delete-actions{flex-direction:column; align-items:stretch;}
-  .setup-card{margin:24px auto; padding:22px 18px;}
-}
-@media (max-width:400px){
-  .topbar .tag{display:none;}
-  .lb-row{grid-template-columns:18px 1fr 58px 52px; font-size:11.5px;}
-  .lb-row.cols3{grid-template-columns:18px 1fr 58px;}
-}
-/* comfortable tap targets on touch devices */
-.btn-primary, .btn-ghost, .btn-danger, .btn-danger-confirm, .goal-save, .goal-cancel{min-height:40px;}
-input[type="date"], input[type="number"], input[type="text"], input[type="password"]{min-height:40px;}
 .card{background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:20px 22px; margin-bottom:20px;}
 .card h2{font-size:17px; margin-bottom:14px;}
 .card h2 .eyebrow{display:block; font-family:'IBM Plex Mono', monospace; font-size:10.5px; letter-spacing:0.14em; color:var(--moss); text-transform:uppercase; margin-bottom:3px;}
@@ -181,6 +151,38 @@ input[type="date"], input[type="number"], input[type="text"], input[type="passwo
 .setup-card code{background:var(--sand); padding:2px 6px; border-radius:4px; font-family:'IBM Plex Mono', monospace; font-size:13px;}
 .setup-card pre{background:#1b1b17; color:#e8e2d0; padding:14px 16px; border-radius:8px; font-size:12.5px; overflow-x:auto; font-family:'IBM Plex Mono', monospace; line-height:1.6;}
 .loading-screen{text-align:center; margin-top:120px; color:var(--ink-soft); font-style:italic;}
+
+/* responsive rules — must stay at the END of the stylesheet so they override the base rules */
+@media (max-width:720px){
+  .wrap{padding:16px 12px 40px;}
+  .grid{grid-template-columns:1fr; gap:14px;}
+  .topbar{flex-wrap:wrap; gap:8px 14px; margin-bottom:16px;}
+  .topbar h1{font-size:23px;}
+  .user-chip{font-size:12.5px; flex-wrap:wrap;}
+  .card{padding:16px 15px; margin-bottom:14px;}
+  .auth-card{margin:24px auto; padding:24px 18px; max-width:none;}
+  .entry-row{flex-direction:column; gap:0;}
+  .entry-row .field{margin-bottom:14px;}
+  .trail-total{font-size:23px;}
+  .trail-stats{flex-wrap:wrap; gap:6px;}
+  .trail-meta{flex-direction:column; align-items:flex-start; gap:6px;}
+  .lb-row{grid-template-columns:20px 1fr 66px 58px; font-size:12.5px; gap:6px; padding:8px 2px;}
+  .lb-row.cols3{grid-template-columns:20px 1fr 66px;}
+  .month-history-row{grid-template-columns:1.1fr 1fr 50px; font-size:12px; gap:6px;}
+  .weeks-wrap{grid-template-columns:1fr; gap:22px;}
+  .goal-edit-form{flex-wrap:wrap;}
+  .goal-edit-form input{width:120px;}
+  .delete-actions{flex-direction:column; align-items:stretch;}
+  .setup-card{margin:24px auto; padding:22px 18px;}
+}
+@media (max-width:400px){
+  .topbar .tag{display:none;}
+  .lb-row{grid-template-columns:18px 1fr 58px 52px; font-size:11.5px;}
+  .lb-row.cols3{grid-template-columns:18px 1fr 58px;}
+}
+/* comfortable tap targets on touch devices */
+.btn-primary, .btn-ghost, .btn-danger, .btn-danger-confirm, .goal-save, .goal-cancel{min-height:40px;}
+input[type="date"], input[type="number"], input[type="text"], input[type="password"]{min-height:40px;}
 </style>
 </head>
 <body>
