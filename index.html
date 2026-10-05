@@ -748,6 +748,20 @@ function dashboardTemplate(){
         <div class="footnote">Počítáno od pondělí do neděle aktuálního týdne, řazeno podle absolutního počtu kroků.</div>
       </div>
     </div>
+    <div class="card">
+      <h2><span class="eyebrow">Týdny</span>Týdenní vyhodnocení</h2>
+      <div class="weeks-wrap">
+        <div>
+          <div class="week-sub">Minulý týden · ${escapeHtml(aw.lastWeekLabel)}</div>
+          ${podiumHtml}
+        </div>
+        <div>
+          <div class="week-sub">Dřívější týdny · počet umístění</div>
+          ${tallyHtml}
+        </div>
+      </div>
+      <div class="footnote">Týden = pondělí až neděle, pořadí podle celkového počtu nachozených kroků (bez ohledu na cíl). Uzavřený týden se přepočítá, pokud někdo doplní kroky zpětně.</div>
+    </div>
     <div class="grid">
       <div class="card">
         <h2><span class="eyebrow">Žebříček</span>Jak si stojíte vůči ostatním</h2>
@@ -769,20 +783,6 @@ function dashboardTemplate(){
         <div>Měsíc</div><div>Nejlepší</div><div style="text-align:right;">Plnění</div>
       </div>
       ${monthHistoryRows}
-    </div>
-    <div class="card">
-      <h2><span class="eyebrow">Týdny</span>Týdenní vyhodnocení</h2>
-      <div class="weeks-wrap">
-        <div>
-          <div class="week-sub">Minulý týden · ${escapeHtml(aw.lastWeekLabel)}</div>
-          ${podiumHtml}
-        </div>
-        <div>
-          <div class="week-sub">Dřívější týdny · počet umístění</div>
-          ${tallyHtml}
-        </div>
-      </div>
-      <div class="footnote">Týden = pondělí až neděle, pořadí podle celkového počtu nachozených kroků (bez ohledu na cíl). Uzavřený týden se přepočítá, pokud někdo doplní kroky zpětně.</div>
     </div>
     <div class="grid">
       <div class="card">
